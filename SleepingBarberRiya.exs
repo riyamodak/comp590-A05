@@ -1,8 +1,8 @@
+# Riya Modak, Brynne Delaney, Jiya Jolly
+
 defmodule HotSwap do
-  @moduledoc """
-  Holds the current implementations for the barber loop and the customer process.
-  These functions can be updated at runtime to “hot swap” behavior.
-  """
+  # holds the barber loop and the customer process
+
   use Agent
 
   def start_link do
@@ -24,11 +24,9 @@ defmodule HotSwap do
   def set_customer(fun), do: Agent.update(__MODULE__, fn state -> Map.put(state, :customer, fun) end)
 end
 
+
+
 defmodule WaitingRoom do
-  @moduledoc """
-  Implements a FIFO waiting room process with a fixed number of chairs.
-  It handles join requests, removal requests, and serves customers to the barber.
-  """
   def start_link(max_chairs) do
     spawn_link(fn -> loop(max_chairs, :queue.new()) end)
   end
@@ -71,10 +69,10 @@ defmodule WaitingRoom do
   end
 end
 
+
+
+
 defmodule Receptionist do
-  @moduledoc """
-  The receptionist greets new customers and sends them to the waiting room.
-  """
   def start_link(waiting_room_pid) do
     spawn_link(fn -> loop(waiting_room_pid) end)
   end
@@ -89,11 +87,10 @@ defmodule Receptionist do
   end
 end
 
+
+
+
 defmodule Barber do
-  @moduledoc """
-  The barber process repeatedly requests a customer from the waiting room.
-  Its behavior is hot swappable via the HotSwap module.
-  """
   def start_link(waiting_room_pid) do
     spawn_link(fn -> loop(waiting_room_pid) end)
   end
@@ -104,15 +101,14 @@ defmodule Barber do
   end
 
   def default_loop(waiting_room_pid) do
-    # Ask the waiting room for a customer.
+    # ask the waiting room for a customer
     send(waiting_room_pid, {:request_customer, self()})
 
     receive do
       {:serve, customer_pid} ->
-        # Inform the customer that service is starting.
+        # start customer service
         send(customer_pid, :start_service)
         IO.puts("Barber starts cutting hair for customer #{inspect(customer_pid)}.")
-        # Simulate a haircut by sleeping a random time.
         haircut_time = :rand.uniform(2000)
         :timer.sleep(haircut_time)
         IO.puts("Barber finished haircut for customer #{inspect(customer_pid)}.")
@@ -129,29 +125,26 @@ defmodule Barber do
 end
 
 
+
+
 defmodule Customer do
-  @moduledoc """
-  Each customer is its own process. When spawned, it uses the current
-  customer process behavior from HotSwap.
-  """
   def spawn_customer(receptionist_pid, waiting_room_pid) do
     customer_fun = HotSwap.get_customer()
     spawn(fn -> customer_fun.(receptionist_pid, waiting_room_pid) end)
   end
 
   def default_loop(receptionist_pid, waiting_room_pid) do
-    # Announce arrival to the receptionist.
+    # greet receptionist
     send(receptionist_pid, {:new_customer, self()})
 
-    # Start a timer that will fire in 5000 ms if not canceled.
+    # start timeout timer
     timer_ref = Process.send_after(self(), :timeout, 5000)
 
     receive do
       :start_service ->
-        # Cancel the timeout now that service is beginning.
+        # cancel timeout timer bc service is beginning
         Process.cancel_timer(timer_ref)
         IO.puts("Customer #{inspect(self())} is now being served.")
-        # Wait for the haircut to complete.
         receive do
           :haircut_done ->
             IO.puts("Customer #{inspect(self())} got a haircut and leaves.")
@@ -169,36 +162,32 @@ defmodule Customer do
 end
 
 
+
+
 defmodule BarberShop do
-  @moduledoc """
-  Main module that starts the simulation. It sets up the HotSwap agent,
-  waiting room, receptionist, barber, and a customer generator.
-  """
   def start do
-    # Start the hot swap agent holding current implementations.
+    # start hot swap agent
     HotSwap.start_link()
 
-    # Start the waiting room process with 6 chairs.
     waiting_room_pid = WaitingRoom.start_link(6)
 
-    # Start the receptionist process.
     receptionist_pid = Receptionist.start_link(waiting_room_pid)
 
-    # Start the barber process.
     _barber_pid = Barber.start_link(waiting_room_pid)
 
-    # Begin generating customers forever.
     spawn(fn -> customer_generator(receptionist_pid, waiting_room_pid) end)
   end
 
   defp customer_generator(receptionist_pid, waiting_room_pid) do
-    # Customers arrive at random intervals.
     :timer.sleep(:rand.uniform(2000))
     Customer.spawn_customer(receptionist_pid, waiting_room_pid)
     customer_generator(receptionist_pid, waiting_room_pid)
   end
 end
 
-# To run the simulation, simply call:
+
+
+
+
 BarberShop.start()
 :timer.sleep(:infinity)
