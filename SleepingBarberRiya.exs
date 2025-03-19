@@ -172,4 +172,4 @@ defmodule BarberShop do
 end
 
 # To run the simulation, simply call:
-# BarberShop.start()
+BarberShop.start()
