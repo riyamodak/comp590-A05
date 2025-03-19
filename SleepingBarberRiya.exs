@@ -10,7 +10,7 @@ defmodule HotSwap do
       fn ->
         %{
           barber: &Barber.default_loop/1,
-          customer: &Customer.default_loop/1
+          customer: &Customer.default_loop/2
         }
       end,
       name: __MODULE__
@@ -27,7 +27,7 @@ end
 defmodule WaitingRoom do
   @moduledoc """
   Implements a FIFO waiting room process with a fixed number of chairs.
-  It handles join requests and serves customers to the barber.
+  It handles join requests, removal requests, and serves customers to the barber.
   """
   def start_link(max_chairs) do
     spawn_link(fn -> loop(max_chairs, :queue.new()) end)
@@ -46,6 +46,11 @@ defmodule WaitingRoom do
           loop(max_chairs, queue)
         end
 
+      {:leave, customer_pid} ->
+        new_queue = remove_customer(queue, customer_pid)
+        IO.puts("Customer #{inspect(customer_pid)} removed from waiting room.")
+        loop(max_chairs, new_queue)
+
       {:request_customer, barber_pid} ->
         case :queue.out(queue) do
           {{:value, customer_pid}, new_queue} ->
@@ -57,6 +62,12 @@ defmodule WaitingRoom do
             loop(max_chairs, queue)
         end
     end
+  end
+
+  defp remove_customer(queue, customer_pid) do
+    list = :queue.to_list(queue)
+    new_list = Enum.reject(list, fn pid -> pid == customer_pid end)
+    :queue.from_list(new_list)
   end
 end
 
@@ -88,7 +99,6 @@ defmodule Barber do
   end
 
   def loop(waiting_room_pid) do
-    # Get the current barber loop function from HotSwap and execute it.
     barber_fun = HotSwap.get_barber()
     barber_fun.(waiting_room_pid)
   end
@@ -99,6 +109,8 @@ defmodule Barber do
 
     receive do
       {:serve, customer_pid} ->
+        # Inform the customer that service is starting.
+        send(customer_pid, :start_service)
         IO.puts("Barber starts cutting hair for customer #{inspect(customer_pid)}.")
         # Simulate a haircut by sleeping a random time.
         haircut_time = :rand.uniform(2000)
@@ -116,31 +128,46 @@ defmodule Barber do
   end
 end
 
+
 defmodule Customer do
   @moduledoc """
   Each customer is its own process. When spawned, it uses the current
   customer process behavior from HotSwap.
   """
-  def spawn_customer(receptionist_pid) do
+  def spawn_customer(receptionist_pid, waiting_room_pid) do
     customer_fun = HotSwap.get_customer()
-    spawn(fn -> customer_fun.(receptionist_pid) end)
+    spawn(fn -> customer_fun.(receptionist_pid, waiting_room_pid) end)
   end
 
-  def default_loop(receptionist_pid) do
-    # Customer announces arrival to the receptionist.
+  def default_loop(receptionist_pid, waiting_room_pid) do
+    # Announce arrival to the receptionist.
     send(receptionist_pid, {:new_customer, self()})
 
+    # Start a timer that will fire in 5000 ms if not canceled.
+    timer_ref = Process.send_after(self(), :timeout, 5000)
+
     receive do
-      :haircut_done ->
-        IO.puts("Customer #{inspect(self())} got a haircut and leaves.")
+      :start_service ->
+        # Cancel the timeout now that service is beginning.
+        Process.cancel_timer(timer_ref)
+        IO.puts("Customer #{inspect(self())} is now being served.")
+        # Wait for the haircut to complete.
+        receive do
+          :haircut_done ->
+            IO.puts("Customer #{inspect(self())} got a haircut and leaves.")
+        end
+
       :shop_full ->
+        Process.cancel_timer(timer_ref)
         IO.puts("Customer #{inspect(self())} leaves because the shop is full.")
-    after
-      5000 ->
+
+      :timeout ->
         IO.puts("Customer #{inspect(self())} waited too long and leaves.")
+        send(waiting_room_pid, {:leave, self()})
     end
   end
 end
+
 
 defmodule BarberShop do
   @moduledoc """
@@ -161,14 +188,14 @@ defmodule BarberShop do
     _barber_pid = Barber.start_link(waiting_room_pid)
 
     # Begin generating customers forever.
-    spawn(fn -> customer_generator(receptionist_pid) end)
+    spawn(fn -> customer_generator(receptionist_pid, waiting_room_pid) end)
   end
 
-  defp customer_generator(receptionist_pid) do
+  defp customer_generator(receptionist_pid, waiting_room_pid) do
     # Customers arrive at random intervals.
     :timer.sleep(:rand.uniform(2000))
-    Customer.spawn_customer(receptionist_pid)
-    customer_generator(receptionist_pid)
+    Customer.spawn_customer(receptionist_pid, waiting_room_pid)
+    customer_generator(receptionist_pid, waiting_room_pid)
   end
 end
 
