@@ -110,6 +110,7 @@ defmodule Barber do
       :no_customer ->
         IO.puts("Barber finds no customer and takes a short nap.")
         :timer.sleep(1000)
+        IO.puts("Barber wakes up from nap.")
         loop(waiting_room_pid)
     end
   end
@@ -173,3 +174,4 @@ end
 
 # To run the simulation, simply call:
 BarberShop.start()
+:timer.sleep(:infinity)
